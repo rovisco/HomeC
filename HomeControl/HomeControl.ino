@@ -20,9 +20,7 @@
 #include <Wire.h>  
 #include <LiquidCrystal_I2C.h>
 
-/*-------- LCD display code ----------*/
 
-LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE); 
 
 /*-------- Temperature reading code ----------*/
 // Data wire is plugged into port 2 on the Arduino
@@ -32,6 +30,10 @@ LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
 #define APIKEY         "PCFjN3QoIAF9EMqXfQEdKVq9TT2y67KwRj4mtHtwyYiuFXZJ" // replace your xively api key here
 #define FEEDID         1877155116 // replace your feed ID 1877155116
 #define USERAGENT      "My Project" // user agent is the project name
+
+/*-------- LCD display code ----------*/
+
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE); 
 
 int buttonPin = 7;
 boolean currentLCDState = LOW;//stroage for current button state
@@ -58,8 +60,10 @@ IPAddress xivelyServer(216,52,233,122);      // numeric IP for api.xively.com
 
 unsigned long xivelyLastConnectionTime = 0;          // last time you connected to the server, in milliseconds
 boolean xivelyLastConnected = false;                 // state of the connection last time through the main loop
-const unsigned long xivelyPostingInterval = 300000; //delay between updates to Xively.com
+const unsigned long xivelyPostingInterval = 60000; //delay between updates to Xively.com
 
+const unsigned long lcdPostingInterval = 10000; //delay between updates to LCD
+unsigned long LcdLastPostingTime = 0;
 
 //for ethernet connection
 
@@ -161,9 +165,11 @@ void setup()
     setSyncProvider(getNtpTime);
     while(timeStatus()== timeNotSet)   
        ; // wait until the time is set by the sync provider
-    Alarm.timerRepeat(10, TimeTemperatureAlarm); 
+    //Alarm.timerRepeat(10, TimeTemperatureAlarm); 
   }
 }
+
+/* ------- LOOP BEGIN -------*/
 /* --- xively code begin ----*/
 void loop(){  
   
@@ -182,8 +188,46 @@ void loop(){
     digitalClockDisplay();  
   }
   */
-  //digitalClockDisplay();
-  readLcdBacklightButton();
+ 
+  
+  
+  if(millis() - LcdLastPostingTime > lcdPostingInterval) {
+    readLcdBacklightButton();
+    digitalClockDisplay();
+    Serial.print("Requesting temperatures...");
+    sensors.requestTemperatures(); // Send the command to get temperatures
+    Serial.println("DONE");
+    printTemperature(insideThermometer); // Use a simple function to print out the data
+    lcd.clear();
+    printTemperatureOnLCD(insideThermometer,lcd); 
+    LcdLastPostingTime = millis();
+  }  
+  /*-------xively code begin ------*/
+  // if there's no net connection, but there was one last time
+  // through the loop, then stop the client:  
+  if (!client.connected() && xivelyLastConnected) {
+    Serial.println();
+    Serial.println("disconnecting.");
+    client.stop();
+  }
+  // if you're not connected, and ten seconds have passed since
+  // your last connection, then connect again and send data:
+  if(!client.connected() && (millis() - xivelyLastConnectionTime > xivelyPostingInterval)) {
+    float tempC = sensors.getTempC(insideThermometer);
+    String dataString = "temperature,";
+    //Serial.print("Temp read: ");
+    //Serial.println(tempC);
+    
+    char buffer[6];
+    dtostrf(tempC,5,2,buffer);
+    dataString += String(buffer);  
+    Serial.print("Post to xively: ");
+    Serial.println(dataString);
+    sendData(dataString);
+  }
+  
+  xivelyLastConnected = client.connected(); // store the state of the connection for next time through the loop
+
   Alarm.delay(100); // wait one second between clock display
 }
 
